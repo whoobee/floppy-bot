@@ -55,6 +55,8 @@ function createGeminiChatInstance(
     model: geminiModel,
     config: {
       tools: convertToolsToGeminiFormat(llmToolsForGemini),
+      temperature: 1.0,
+      maxOutputTokens: 2048,
       systemInstruction: {
         parts: [{ text: customSystemPrompt || systemPrompt }],
         role: "system",
