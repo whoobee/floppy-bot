@@ -1,12 +1,37 @@
 #!/bin/bash
 
-# disable graphical interface
-sudo systemctl set-default multi-user.target
+# Get user info
+TARGET_USER=$(whoami)
+USER_HOME=$HOME
+TARGET_UID=$(id -u $TARGET_USER)
 
-# WORKING_DIR="/home/pi/whisplay-ai-chatbot"
-echo "Setting up the chatbot service..."
+# Make sure we do not return roon (in case user called the script with sudo)
+if [ "$TARGET_USER" == "root" ]; then
+    echo "Error: Please run this script as your normal user (WITHOUT sudo)."
+    echo "The script will ask for sudo permissions only when writing the service file."
+    exit 1
+fi
 
-sudo bash -c 'cat > /etc/systemd/system/chatbot.service <<EOF
+echo "----------------------------------------"
+echo "Detected User: $TARGET_USER"
+echo "Detected Home: $USER_HOME"
+echo "Detected UID:  $TARGET_UID"
+
+# Find Node bin
+NODE_BIN=$(which node)
+
+if [ -z "$NODE_BIN" ]; then
+    echo "Error: Could not find 'node'. Make sure you can run 'node -v' in this terminal."
+    exit 1
+fi
+
+NODE_FOLDER=$(dirname $NODE_BIN)
+echo "Found Node at: $NODE_FOLDER"
+echo "----------------------------------------"
+
+# Create the service file
+echo "Creating systemd service file..."
+sudo tee /etc/systemd/system/chatbot.service > /dev/null <<EOF
 [Unit]
 Description=Chatbot Service
 After=network.target sound.target
@@ -14,33 +39,41 @@ Wants=sound.target
 
 [Service]
 Type=simple
-User=pi
+User=$TARGET_USER
 Group=audio
-SupplementaryGroups=audio
+SupplementaryGroups=audio video gpio
 
-WorkingDirectory=/home/pi/whisplay-ai-chatbot
-ExecStart=/bin/bash /home/pi/whisplay-ai-chatbot/run_chatbot.sh
+# Use the dynamic Home Directory
+WorkingDirectory=$USER_HOME/whisplay-ai-chatbot
+ExecStart=/bin/bash $USER_HOME/whisplay-ai-chatbot/run_chatbot.sh
 
-# Environment variables (ALSA / mpg123 are very important)
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:/home/pi/.local/bin
-Environment=HOME=/home/pi
-Environment=XDG_RUNTIME_DIR=/run/user/1000
+# Inject the dynamic Node path and dynamic User ID
+Environment=PATH=$NODE_FOLDER:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
+Environment=HOME=$USER_HOME
+Environment=XDG_RUNTIME_DIR=/run/user/$TARGET_UID
+Environment=NODE_ENV=production
 
-# Make sure the service has access to audio devices
+# Audio permissions
 PrivateDevices=no
 
-StandardOutput=append:/home/pi/whisplay-ai-chatbot/chatbot.log
-StandardError=append:/home/pi/whisplay-ai-chatbot/chatbot.log
+# Logs
+StandardOutput=append:$USER_HOME/whisplay-ai-chatbot/chatbot.log
+StandardError=append:$USER_HOME/whisplay-ai-chatbot/chatbot.log
 
 Restart=always
 RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
-EOF'
+EOF
 
-echo "Chatbot service file created."
-echo "Enabling and starting the chatbot service..."
-
+# start the service
+echo "Service file created. Reloading Systemd..."
+sudo systemctl daemon-reload
 sudo systemctl enable chatbot.service
-sudo systemctl start chatbot.service
+sudo systemctl restart chatbot.service
+
+echo "Done! Chatbot is starting..."
+echo "Checking status..."
+sleep 2
+sudo systemctl status chatbot --no-pager
